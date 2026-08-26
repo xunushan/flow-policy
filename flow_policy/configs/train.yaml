@@ -5,12 +5,12 @@
 metas_path: /Users/isuntaiyang/Documents/competition/goai_2026/data/lerobot_v30_ee/meta.json
 
 seed: 42
-num_actions: 10          # flow 目标 chunk 步数（query_duration=1.0s → 步长 0.1s；handler 网格与录制帧率解耦）
+num_actions: 30          # flow 目标 chunk 步数（query_duration=1.0s → 步长 ~0.033s；handler 网格与录制帧率解耦）
 batch_size: 8            # 24GB 显存保守起步（12/12/768 骨干）；跑通后可试 16，A100/H100(80GB) 可 32
 num_workers: 8
 image_aug: true          # 训练期 ColorJitter 数据增强（不会 Normalize）
 use_frame_weight: false  # 使用 data/*.parquet 的 frame_weight 列做逐帧重采样（v3.0 专属）
-gradient_accumulation_steps: 1
+gradient_accumulation_steps: 4   # 24GB 卡 batch=8 × 4 = 有效 batch 32
 
 # 预计算 embedding（precompute.py 输出目录）：true 则从 npy 索引，不走视频解码/DINOv2
 # false 则 on-the-fly 视频解码（保底）。注意：precompute 无 per-epoch 增强（每帧固定编码）
@@ -35,7 +35,7 @@ model:
   cond_dim: 384          # DINOv2 vits14 patch token 维度
   n_patches: 256         # 每视图 patch 数（224x224, patch_size 14 -> 16x16）
   views: 3               # cam_high + 左/右 wrist
-  num_actions: 10
+  num_actions: 30
   n_obs_steps: 1         # 观测窗口帧数；>1 时 obs_cond 按窗口序平铺 [T_obs*V*P, E]（块因果 mask 对应）
   n_layer: 12
   n_head: 12
