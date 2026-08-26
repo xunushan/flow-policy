@@ -26,6 +26,7 @@ FlowPolicy
 flow_policy/
 ├── train.py                   # 训练主循环（无 rollout）
 ├── configs/train.yaml         # 配置（键名参照 patch_policy configs）
+├── scripts/setup_env.sh       # GPU 服务器 conda 环境一键配置
 ├── models/
 │   ├── model.py               # FlowPolicy（核心）
 │   ├── vision.py              # DinoV2Encoder（copy patch_policy dino.py）
@@ -34,19 +35,33 @@ flow_policy/
 └── datasets/                  # copy X-VLA xvla_datasets/（registry 精简到 arx_x5_ee）
 ```
 
-## 运行
+## 环境配置（GPU 服务器）
 
 ```bash
+# 一键装 conda 环境（缺 Miniconda 自动装）+ 全部训练依赖 + 自检
+bash flow_policy/scripts/setup_env.sh
+# 可选：按 NVIDIA 驱动版本换 CUDA wheel，如驱动较新时
+#   CUDA_TAG=cu126 bash flow_policy/scripts/setup_env.sh
+# 详情与可选变量见 scripts/setup_env.sh 顶部注释
+```
+
+## 运行
+
+命令都在 **`flow_policy/` 目录下**执行（`train.py`/`precompute.py` 依赖本地 `models/`、`datasets/` 包）：
+
+```bash
+cd flow_policy
+
 # 1) （可选）预计算 embedding：把视频编码成 DINOv2 patch 特征，每相机一个 npy。
 #    单 task ~5 万帧 fp32 ≈ 58GB。不跑则走 on-the-fly 视频解码（保底）。
-python flow_policy/precompute.py --config flow_policy/configs/train.yaml \
+python precompute.py --config configs/train.yaml \
     --out_dir data_precompute/goai_task1
 
 # 2) 训练（bf16 由 accelerate 指定，代码不硬编码精度）
 #    train.yaml: precomputed_embeddings: true  + precomputed_dir: data_precompute/goai_task1
 #    （false + 不设 precomputed_dir = on-the-fly）
 accelerate launch --mixed_precision=bf16 \
-    flow_policy/train.py --config flow_policy/configs/train.yaml
+    train.py --config configs/train.yaml
 
 # 单 task 训练：在处理数据时把 meta.json 的 episodes 填成该 task 的 episode_index 列表即可
 ```
