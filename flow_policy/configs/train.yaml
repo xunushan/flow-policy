@@ -2,7 +2,8 @@
 # 用法：accelerate launch --mixed_precision=bf16 flow_policy/train.py --config flow_policy/configs/train.yaml
 
 # 指向你处理数据时放在数据路径下的 meta.json（见 README「meta.json 格式」）
-metas_path: /Users/isuntaiyang/Documents/competition/goai_2026/data/lerobot_v30_ee/meta.json
+# 服务器：train 服务器 /data/data/lerobot_v30_ee_6d/meta.json（已过滤到单任务 episodes 800-899）
+metas_path: /data/data/lerobot_v30_ee_6d/meta.json
 
 seed: 42
 num_actions: 30          # flow 目标 chunk 步数（query_duration=1.0s → 步长 ~0.033s；handler 网格与录制帧率解耦）
@@ -14,15 +15,16 @@ gradient_accumulation_steps: 4   # 24GB 卡 batch=8 × 4 = 有效 batch 32
 
 # 预计算 embedding（precompute.py 输出目录）：true 则从 npy 索引，不走视频解码/DINOv2
 # false 则 on-the-fly 视频解码（保底）。注意：precompute 无 per-epoch 增强（每帧固定编码）
+# precompute 产物与训练 ckpt 都放服务器 /cloud/cloud-ssd1/goai_800/
 precomputed_embeddings: false
-precomputed_dir: null
+precomputed_dir: /cloud/cloud-ssd1/goai_800/data_precompute
 
 iters: 100000
 warmup_steps: 2000
 max_grad_norm: 1.0
 log_interval: 20
 save_interval: 5000
-save_path: checkpoints
+save_path: /cloud/cloud-ssd1/goai_800/checkpoints
 
 optim:
   lr: 0.0001          # 写小数形式：yaml 6.x 把 `1e-4`（无小数点）解析成 str
