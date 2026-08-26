@@ -7,23 +7,25 @@ metas_path: /data/data/lerobot_v30_ee_6d/meta.json
 
 seed: 42
 num_actions: 30          # flow 目标 chunk 步数（query_duration=1.0s → 步长 ~0.033s；handler 网格与录制帧率解耦）
-batch_size: 8            # 24GB 显存保守起步（12/12/768 骨干）；跑通后可试 16，A100/H100(80GB) 可 32
+# 24GB 卡实测上限：batch 256 峰值 21.7GB（90%）。precompute 模式下 batch 即有效 batch
+batch_size: 256
 num_workers: 8
-image_aug: true          # 训练期 ColorJitter 数据增强（不会 Normalize）
+image_aug: false         # precompute 模式固定编码，无逐帧增强，此开关无意义，置 false 明确
 use_frame_weight: false  # 使用 data/*.parquet 的 frame_weight 列做逐帧重采样（v3.0 专属）
-gradient_accumulation_steps: 4   # 24GB 卡 batch=8 × 4 = 有效 batch 32
+gradient_accumulation_steps: 1   # batch 256 已够大，无需累积；有效 batch = batch_size
 
 # 预计算 embedding（precompute.py 输出目录）：true 则从 npy 索引，不走视频解码/DINOv2
 # false 则 on-the-fly 视频解码（保底）。注意：precompute 无 per-epoch 增强（每帧固定编码）
 # precompute 产物与训练 ckpt 都放服务器 /cloud/cloud-ssd1/goai_800/
-precomputed_embeddings: false
+precomputed_embeddings: true
 precomputed_dir: /cloud/cloud-ssd1/goai_800/data_precompute
 
-iters: 100000
-warmup_steps: 2000
+# 40 epochs × (26550 帧 / batch 256 ≈ 104 步) ≈ 4,200 iters
+iters: 4200
+warmup_steps: 400        # ~10% iters
 max_grad_norm: 1.0
 log_interval: 20
-save_interval: 5000
+save_interval: 1000      # 每 ~10 epochs 存一个 ckpt（共 4 个）
 save_path: /cloud/cloud-ssd1/goai_800/checkpoints
 
 optim:

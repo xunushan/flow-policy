@@ -1,0 +1,41 @@
+# 冒烟测试专用：加载 precompute + gradient_accumulation_steps=1，扫 batch_size 上限（24GB）。
+# 运行：accelerate launch --mixed_precision=bf16 train.py --config configs/smoke_precompute.yaml --batch_size 8
+metas_path: /data/data/lerobot_v30_ee_6d/meta.json
+
+seed: 42
+num_actions: 30
+batch_size: 8            # 用 --batch_size 覆盖做上限扫描
+num_workers: 8
+image_aug: false
+use_frame_weight: false
+gradient_accumulation_steps: 1   # 冒烟：一次 optimizer step = 一个 micro-batch
+
+# 走 precompute mmap 索引（/cloud/cloud-ssd1/goai_800/data_precompute）
+precomputed_embeddings: true
+precomputed_dir: /cloud/cloud-ssd1/goai_800/data_precompute
+
+iters: 8
+warmup_steps: 2
+max_grad_norm: 1.0
+log_interval: 2
+save_interval: 100000    # 冒烟不落盘
+save_path: /cloud/cloud-ssd1/goai_800/checkpoints_smoke
+
+optim:
+  lr: 0.0001
+  weight_decay: 0.0
+  betas: [0.9, 0.95]
+
+model:
+  dim_action: 20
+  dim_propio: 20
+  cond_dim: 384
+  n_patches: 256
+  views: 3
+  num_actions: 30
+  n_obs_steps: 1
+  n_layer: 12
+  n_head: 12
+  n_embd: 768
+  p_drop_emb: 0.0
+  p_drop_attn: 0.1

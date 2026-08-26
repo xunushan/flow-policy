@@ -111,6 +111,12 @@ def main(cfg: Dict):
 
     model.train()
     global_step = 0
+    # 累积批次日志（对齐 X-VLA train.py）：每个 micro-batch 按真实样本数加权累积 loss
+    # 分量，在 optimizer step 边界跨 micro-batch/rank 归并，日志对应完整 effective batch
+    # 而不是最后一个 micro-batch。
+    effective_loss_sums: Dict[str, torch.Tensor] = {}
+    effective_loss_total_sum = None
+    effective_batch_samples_local = 0
     while global_step < iters:
         with accelerator.accumulate(model):
             batch = next(train_iter)
@@ -134,12 +140,37 @@ def main(cfg: Dict):
             )
             loss = sum(loss_dict.values())
 
+            # 日志聚合：loss_dict 是 micro-batch 的 batch-mean，按真实 micro-batch 样本数
+            # 加权累积（detach 只留标量），在 sync_gradients 边界归并成 effective-batch mean。
+            micro_batch_samples = int(inputs["action"].shape[0])
+            for name, value in loss_dict.items():
+                weighted = value.detach().float() * micro_batch_samples
+                if name in effective_loss_sums:
+                    effective_loss_sums[name] += weighted
+                else:
+                    effective_loss_sums[name] = weighted
+            weighted_total = loss.detach().float() * micro_batch_samples
+            if effective_loss_total_sum is None:
+                effective_loss_total_sum = weighted_total
+            else:
+                effective_loss_total_sum += weighted_total
+            effective_batch_samples_local += micro_batch_samples
+
             accelerator.backward(loss)
             if accelerator.sync_gradients:
                 # 线性 warmup -> constant
                 lr = base_lr * min(1.0, (global_step + 1) / max(warmup_steps, 1))
                 for g in optim.param_groups:
                     g["lr"] = lr
+                # 剪裁前梯度 L2 范数（与 X-VLA 日志一致）
+                grad_norm = float(
+                    sum(
+                        p.grad.norm().item() ** 2
+                        for p in model.parameters()
+                        if p.grad is not None
+                    )
+                    ** 0.5
+                )
                 accelerator.clip_grad_norm_(model.parameters(), max_grad_norm)
                 optim.step()
                 optim.zero_grad()
@@ -148,16 +179,57 @@ def main(cfg: Dict):
             global_step += 1
 
             if global_step % log_interval == 0:
-                logs = {k: v.detach().float().item() for k, v in loss_dict.items()}
+                if (
+                    effective_loss_total_sum is None
+                    or effective_batch_samples_local <= 0
+                ):
+                    raise RuntimeError(
+                        "No micro-batch losses collected for effective-batch logging"
+                    )
+                # 一次 collective 同时归并各 loss 分量与 total；除以全局真实样本数
+                # 得到本 optimizer update 对应的 effective-batch mean loss。
+                loss_names = tuple(effective_loss_sums)
+                local_stats = torch.stack(
+                    [effective_loss_sums[name] for name in loss_names]
+                    + [
+                        effective_loss_total_sum,
+                        effective_loss_total_sum.new_tensor(
+                            float(effective_batch_samples_local)
+                        ),
+                    ]
+                )
+                global_stats = accelerator.reduce(local_stats, reduction="sum")
+                effective_batch_samples_global = float(global_stats[-1].item())
+                denominator = max(effective_batch_samples_global, 1.0)
+                logs = {
+                    name: float(global_stats[index].item() / denominator)
+                    for index, name in enumerate(loss_names)
+                }
+                logs["loss_total"] = float(global_stats[-2].item() / denominator)
+                logs["effective_batch_samples"] = effective_batch_samples_global
+                logs["grad_norm"] = grad_norm
                 logs["step"] = global_step
                 logs["lr"] = lr
                 accelerator.log(logs, step=global_step)
+                # 打印各 loss 分量（去 _loss 后缀），便于观察各动作头收敛
+                loss_parts = " ".join(
+                    f"{k[:-len('_loss')]}={v:.4f}"
+                    for k, v in logs.items()
+                    if k.endswith("_loss") and k != "loss_total"
+                )
                 accelerator.print(
                     f"[{global_step}/{iters}] "
-                    + " | ".join(
-                        f"{k}={v:.4f}" for k, v in logs.items() if k != "step"
-                    )
+                    f"loss={logs['loss_total']:.4f} [{loss_parts}] "
+                    f"batch={int(logs['effective_batch_samples'])} "
+                    f"grad_norm={logs['grad_norm']:.4f} "
+                    f"lr={logs['lr']:.2e}"
                 )
+
+            # 无论本 step 是否打印，都必须在 optimizer step 边界清空累积器，
+            # 避免把多个 optimizer update 混入下一次日志。
+            effective_loss_sums = {}
+            effective_loss_total_sum = None
+            effective_batch_samples_local = 0
 
             if global_step % save_interval == 0:
                 ckpt_path = os.path.join(save_path, f"ckpt-{global_step}.pt")
