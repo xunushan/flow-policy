@@ -9,21 +9,21 @@
 # 可配置环境变量（默认值见下）:
 #     ENV_NAME        conda 环境名（默认 goai_flow）
 #     PYTHON_VERSION  Python 版本（默认 3.11）
-#     CUDA_TAG        PyTorch wheel 的 CUDA 标签（默认 cu124）
-#     PIN_TORCH       固定 torch 版本（默认装 index 内最新，如设 2.5.1 则装 2.5.1）
+#     CUDA_TAG        PyTorch wheel 的 CUDA 标签（默认 cu128）
+#     PIN_TORCH       固定 torch 版本（默认装 index 内最新，如设 2.8.0 则装 2.8.0）
 #
 # CUDA_TAG 选择参考（取决于 NVIDIA 驱动版本，nvidia-smi 可查）:
 #     cu118  -> 老驱动（>= 450.80.02）          torch 2.2.x，兼容 RTX3090/T4/V100 等
-#     cu124  -> 驱动 >= 545.23.07（默认）       torch 2.5.x，Ampere+/Hopper 主流
+#     cu124  -> 驱动 >= 545.23.07               torch 2.5.x，Ampere+/Hopper 主流
 #     cu126  -> 驱动 >= 560.x                   torch 2.6.x
-#     cu128  -> 驱动 >= 570.x                   torch 2.8.x，H100/B100 等最新卡
+#     cu128  -> 驱动 >= 570.x（默认）           torch 2.8.x，H100/B100 等最新卡
 #     驱动很新时也可不设 index，直接 pip install torch torchvision（PyPI 自带 CUDA）。
 # =============================================================================
 set -euo pipefail
 
 ENV_NAME="${ENV_NAME:-goai_flow}"
 PYTHON_VERSION="${PYTHON_VERSION:-3.11}"
-CUDA_TAG="${CUDA_TAG:-cu124}"
+CUDA_TAG="${CUDA_TAG:-cu128}"
 PIN_TORCH="${PIN_TORCH:-}"
 CONDA_HOME_DEF="${CONDA_HOME_DEF:-$HOME/miniconda3}"
 

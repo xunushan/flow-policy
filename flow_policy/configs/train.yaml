@@ -5,8 +5,8 @@
 metas_path: /Users/isuntaiyang/Documents/competition/goai_2026/data/lerobot_v30_ee/meta.json
 
 seed: 42
-num_actions: 10          # flow 目标 chunk 步数（query_duration=1.0s @fps25 → 步长 0.1s）
-batch_size: 16
+num_actions: 10          # flow 目标 chunk 步数（query_duration=1.0s → 步长 0.1s；handler 网格与录制帧率解耦）
+batch_size: 8            # 24GB 显存保守起步（12/12/768 骨干）；跑通后可试 16，A100/H100(80GB) 可 32
 num_workers: 8
 image_aug: true          # 训练期 ColorJitter 数据增强（不会 Normalize）
 use_frame_weight: false  # 使用 data/*.parquet 的 frame_weight 列做逐帧重采样（v3.0 专属）
