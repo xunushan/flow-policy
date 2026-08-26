@@ -1,0 +1,37 @@
+# 原始开源代码（patch_policy 原仓库不属于本项目，不跟踪）
+patch_policy/
+
+# 参考论文（第三方，不提交）
+*.pdf
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.ipynb_checkpoints/
+
+# 训练产物
+checkpoints/
+data_precompute/
+*.npy
+*.npz
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# 数据
+data/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# 环境 / Agent
+.env
+.claude/

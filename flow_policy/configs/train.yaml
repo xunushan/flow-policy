@@ -1,0 +1,44 @@
+# flow_policy 训练配置（键名参照 patch_policy/configs/train_libero_goal_diffusion.yaml，扁平化）
+# 用法：accelerate launch --mixed_precision=bf16 flow_policy/train.py --config flow_policy/configs/train.yaml
+
+# 指向你处理数据时放在数据路径下的 meta.json（见 README「meta.json 格式」）
+metas_path: /Users/isuntaiyang/Documents/competition/goai_2026/data/lerobot_v30_ee/meta.json
+
+seed: 42
+num_actions: 10          # flow 目标 chunk 步数（query_duration=1.0s @fps25 → 步长 0.1s）
+batch_size: 16
+num_workers: 8
+image_aug: true          # 训练期 ColorJitter 数据增强（不会 Normalize）
+use_frame_weight: false  # 使用 data/*.parquet 的 frame_weight 列做逐帧重采样（v3.0 专属）
+gradient_accumulation_steps: 1
+
+# 预计算 embedding（precompute.py 输出目录）：true 则从 npy 索引，不走视频解码/DINOv2
+# false 则 on-the-fly 视频解码（保底）。注意：precompute 无 per-epoch 增强（每帧固定编码）
+precomputed_embeddings: false
+precomputed_dir: null
+
+iters: 100000
+warmup_steps: 2000
+max_grad_norm: 1.0
+log_interval: 20
+save_interval: 5000
+save_path: checkpoints
+
+optim:
+  lr: 0.0001          # 写小数形式：yaml 6.x 把 `1e-4`（无小数点）解析成 str
+  weight_decay: 0.0
+  betas: [0.9, 0.95]
+
+model:
+  dim_action: 20
+  dim_propio: 20
+  cond_dim: 384          # DINOv2 vits14 patch token 维度
+  n_patches: 256         # 每视图 patch 数（224x224, patch_size 14 -> 16x16）
+  views: 3               # cam_high + 左/右 wrist
+  num_actions: 10
+  n_obs_steps: 1         # 观测窗口帧数；>1 时 obs_cond 按窗口序平铺 [T_obs*V*P, E]（块因果 mask 对应）
+  n_layer: 12
+  n_head: 12
+  n_embd: 768
+  p_drop_emb: 0.0
+  p_drop_attn: 0.1
