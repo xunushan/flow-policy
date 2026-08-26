@@ -56,6 +56,12 @@ def main(cfg: Dict):
     )
     accelerator.init_trackers("flow-policy")
 
+    # 打印完整训练配置：日志首屏即参数确认依据，方便与 train.yaml 核对
+    accelerator.print("=" * 60)
+    accelerator.print("flow_policy Training config:")
+    accelerator.print(yaml.dump(cfg, sort_keys=False, default_flow_style=False))
+    accelerator.print("=" * 60)
+
     # seed
     seed = cfg.get("seed", 42)
     random.seed(seed + accelerator.process_index)
@@ -75,6 +81,39 @@ def main(cfg: Dict):
         weight_decay=float(cfg["optim"].get("weight_decay", 0.0)),
         betas=[float(b) for b in cfg["optim"].get("betas", [0.9, 0.95])],
     )
+    # ---- resume：从 ckpt 继续（对齐 X-VLA/train.py：权重/optimizer/RNG 都在 prepare 之前灌回
+    # 裸模型，global_step 从保存处续跑；lr 是 global_step 的纯函数，循环内公式自动取调度点）----
+    global_step = 0
+    resume_path = cfg.get("resume")
+    if resume_path:
+        accelerator.print(f"Resuming from {resume_path}")
+        _ckpt = torch.load(resume_path, map_location="cpu")
+        # 1) 模型权重：load 进裸 FlowPolicy（prepare 包装前恢复，键直接匹配）
+        _missing, _unexpected = model.load_state_dict(_ckpt["model_state_dict"])
+        accelerator.print(
+            f"  model weights: missing={len(_missing)} unexpected={len(_unexpected)}"
+        )
+        # 2) optimizer 动量/步数（AcceleratedOptimizer 会委托到底层 AdamW，prepare 前灌回最稳）
+        optim.load_state_dict(_ckpt["optimizer_state_dict"])
+        # 3) RNG（torch/cuda/numpy/random，per-rank）：恢复 dropout 等随机序列。
+        #    旧 ckpt（ckpt-1000~3000）无此字段则跳过，新保存的 ckpt 自动带上。
+        rng = _ckpt.get(f"rng_state_rank{accelerator.process_index}")
+        if rng is not None:
+            torch.set_rng_state(rng["torch"])
+            if rng.get("cuda") is not None and torch.cuda.is_available():
+                torch.cuda.set_rng_state_all(rng["cuda"][: torch.cuda.device_count()])
+            np.random.set_state(rng["numpy"])
+            random.setstate(rng["random"])
+            accelerator.print("  RNG state restored")
+        else:
+            accelerator.print("  no RNG state in ckpt; skip RNG restore")
+        # 4) global_step 续跑：3000 > warmup(400)，lr 公式自动取 base_lr，无需额外处理
+        global_step = int(_ckpt["global_step"])
+        accelerator.print(
+            f"  resumed at global_step={global_step}; "
+            f"lr schedule picks {float(cfg['optim']['lr'])} (past warmup)"
+        )
+
     model, optim = accelerator.prepare(model, optim)
 
     # ---- data ----
@@ -110,7 +149,7 @@ def main(cfg: Dict):
     os.makedirs(save_path, exist_ok=True)
 
     model.train()
-    global_step = 0
+    # global_step 已在 resume 块初始化（非 resume 时为 0；resume 则从保存处续跑）
     # 累积批次日志（对齐 X-VLA train.py）：每个 micro-batch 按真实样本数加权累积 loss
     # 分量，在 optimizer step 边界跨 micro-batch/rank 归并，日志对应完整 effective batch
     # 而不是最后一个 micro-batch。
@@ -233,11 +272,22 @@ def main(cfg: Dict):
 
             if global_step % save_interval == 0:
                 ckpt_path = os.path.join(save_path, f"ckpt-{global_step}.pt")
+                # per-rank RNG（对齐 X-VLA save_rng_state：torch/cuda/numpy/random），供 resume
+                # 恢复 dropout 等随机序列。单卡只有 rank0，嵌入同一文件；accelerator.save 只在
+                # 主进程写盘，多卡时每 rank 需另存 rng_state_rank{k}.pt。
                 accelerator.save(
                     {
                         "model_state_dict": accelerator.unwrap_model(model).state_dict(),
                         "optimizer_state_dict": optim.state_dict(),
                         "global_step": global_step,
+                        f"rng_state_rank{accelerator.process_index}": {
+                            "torch": torch.get_rng_state(),
+                            "cuda": torch.cuda.get_rng_state_all()
+                            if torch.cuda.is_available()
+                            else None,
+                            "numpy": np.random.get_state(),
+                            "random": random.getstate(),
+                        },
                     },
                     ckpt_path,
                 )
@@ -254,6 +304,8 @@ if __name__ == "__main__":
     parser.add_argument("--iters", type=int, default=None, help="override iters")
     parser.add_argument("--batch_size", type=int, default=None, help="override batch_size")
     parser.add_argument("--num_workers", type=int, default=None, help="override num_workers")
+    parser.add_argument("--resume", type=str, default=None,
+                        help="从该 ckpt 继续训练（不 warmup，global_step 从保存处续跑）")
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -263,5 +315,7 @@ if __name__ == "__main__":
         v = getattr(args, k)
         if v is not None:
             cfg[k] = v
+    if args.resume:
+        cfg["resume"] = args.resume
 
     main(cfg)
