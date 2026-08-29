@@ -87,7 +87,9 @@ def main(cfg: Dict):
     resume_path = cfg.get("resume")
     if resume_path:
         accelerator.print(f"Resuming from {resume_path}")
-        _ckpt = torch.load(resume_path, map_location="cpu")
+        # torch>=2.6 默认 weights_only=True，会拒绝 ckpt 里的 numpy RNG 状态；
+        # ckpt 为自产可信文件，显式 weights_only=False
+        _ckpt = torch.load(resume_path, map_location="cpu", weights_only=False)
         # 1) 模型权重：load 进裸 FlowPolicy（prepare 包装前恢复，键直接匹配）
         _missing, _unexpected = model.load_state_dict(_ckpt["model_state_dict"])
         accelerator.print(
